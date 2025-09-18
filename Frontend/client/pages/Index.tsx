@@ -3,21 +3,30 @@ import { SiteHeader } from "@/components/layout/SiteHeader";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { ChatPanel } from "@/components/regnav/ChatPanel";
 import { SourcesPanel } from "@/components/regnav/SourcesPanel";
+import { FiltersPanel } from "@/components/regnav/FiltersPanel";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
-import { SearchFilters, ScoredDoc } from "@shared/api";
+import { SearchFilters, ChatCitation } from "@shared/api";
+import { createDefaultSearchFilters } from "@/lib/searchFilters";
+import { ensureUserId } from "@/lib/user";
 
 export default function Index() {
-  const [filters, setFilters] = useState<SearchFilters>({ jurisdiction: "Maryland" });
-  const [latestHits, setLatestHits] = useState<ScoredDoc[]>([]);
+  const [filters, setFilters] = useState<SearchFilters>(() => createDefaultSearchFilters());
+  const [latestHits, setLatestHits] = useState<ChatCitation[]>([]);
+  const [userId, setUserId] = useState<string>("");
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const ce = e as CustomEvent<ScoredDoc[]>;
+      const ce = e as CustomEvent<ChatCitation[]>;
       setLatestHits(ce.detail || []);
     };
     window.addEventListener("regnav:citations", handler as EventListener);
     return () => window.removeEventListener("regnav:citations", handler as EventListener);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setUserId(ensureUserId());
   }, []);
 
   return (
@@ -54,12 +63,17 @@ export default function Index() {
         <section id="workspace" className="grid grid-cols-1 gap-6 md:grid-cols-12">
           <div className="md:col-span-8">
             <div className="rounded-2xl border bg-card p-4">
-              <ChatPanel filters={filters} />
+              <ChatPanel filters={filters} userId={userId} session={null} />
             </div>
           </div>
           <aside className="md:col-span-4">
-            <div className="rounded-2xl border bg-card p-4">
-              <SourcesPanel latestHits={latestHits} />
+            <div className="space-y-4">
+              <div className="rounded-2xl border bg-card p-4">
+                <FiltersPanel value={filters} onChange={setFilters} onReset={() => setFilters(createDefaultSearchFilters())} />
+              </div>
+              <div className="rounded-2xl border bg-card p-4">
+                <SourcesPanel latestHits={latestHits} />
+              </div>
             </div>
           </aside>
         </section>

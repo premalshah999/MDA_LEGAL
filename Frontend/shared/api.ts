@@ -33,35 +33,6 @@ export interface SearchFilters {
   section?: string; // e.g., 15.20.13.02
 }
 
-export interface SearchRequest {
-  query: string;
-  filters?: SearchFilters;
-  topK?: number;
-}
-
-export interface Snippet {
-  text: string;
-  start: number;
-  end: number;
-}
-
-export interface ScoredDoc {
-  meta: RegDocumentMeta;
-  score: number;
-  snippet: Snippet;
-  highlights: string[]; // matched terms
-}
-
-export interface SearchResponse {
-  answer: string; // deterministic synthesis from top matches
-  hits: ScoredDoc[];
-  tokenUsage?: {
-    // reserved for future LLM integration
-    inputTokens?: number;
-    outputTokens?: number;
-  };
-}
-
 export interface ListDocumentsResponse {
   documents: RegDocumentMeta[];
 }
@@ -73,4 +44,82 @@ export interface AddDocumentRequest extends RegDocumentMeta {
 export interface AddDocumentResponse {
   ok: true;
   document: RegDocumentMeta;
+}
+
+export interface ChatCitation {
+  id: string;
+  label: string;
+  pages: string;
+  url?: string;
+  docId?: string;
+  docTitle?: string;
+  comarNumber?: string;
+  comarDisplay?: string;
+  snippet?: string;
+}
+
+export type ChatRole = "user" | "assistant";
+
+export interface ChatMessage {
+  id: string;
+  role: ChatRole;
+  content: string;
+  createdAt: string;
+  citations?: ChatCitation[];
+}
+
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  snippet?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatSessionDetail extends ChatSessionSummary {
+  messages: ChatMessage[];
+}
+
+export interface ChatAskRequest {
+  question: string;
+  filters?: SearchFilters;
+  topK?: number;
+  sessionId?: string;
+  sessionTitle?: string;
+}
+
+export interface ChatAskResponse {
+  answer: string;
+  sources: ChatCitation[];
+  sessionId: string;
+  userMessage: ChatMessage;
+  assistantMessage: ChatMessage;
+  session: ChatSessionSummary;
+}
+
+export interface ListSessionsResponse {
+  sessions: ChatSessionSummary[];
+}
+
+export interface ChatSessionResponse {
+  session: ChatSessionDetail;
+}
+
+export interface ChatSessionCreateResponse {
+  session: ChatSessionSummary;
+}
+
+export interface ChatMemory {
+  id: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListMemoriesResponse {
+  memories: ChatMemory[];
+}
+
+export interface ChatMemoryResponse {
+  memory: ChatMemory;
 }
