@@ -1,8 +1,8 @@
-import { ScoredDoc } from "@shared/api";
+import { ChatCitation } from "@shared/api";
 import { SourceCard } from "./SourceCard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
-export function SourcesPanel({ latestHits }: { latestHits: ScoredDoc[] }) {
+export function SourcesPanel({ latestHits }: { latestHits: ChatCitation[] }) {
   return (
     <div className="w-full">
       <div className="mt-0">
@@ -14,7 +14,7 @@ export function SourcesPanel({ latestHits }: { latestHits: ScoredDoc[] }) {
             {latestHits.length === 0 ? (
               <p className="text-sm text-muted-foreground">Run a query to see top-matching sources.</p>
             ) : (
-              latestHits.map((h) => <SourceCard key={h.meta.id} hit={h} />)
+              latestHits.map((h) => <SourceCard key={h.id} hit={h} />)
             )}
           </TabsContent>
         </Tabs>

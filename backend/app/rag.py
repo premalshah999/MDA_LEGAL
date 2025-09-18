@@ -22,7 +22,7 @@ import os
 import re
 import hashlib
 import datetime
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 
 import numpy as np
 import pandas as pd
@@ -49,14 +49,14 @@ def normalize_whitespace(text: str) -> str:
     return text.strip()
 
 
-def chunk_pages(pages: List[str], chunk_chars: int = 1500, overlap_chars: int = 200) -> List[Dict[str, any]]:
+def chunk_pages(pages: List[str], chunk_chars: int = 1500, overlap_chars: int = 200) -> List[Dict[str, Any]]:
     """
     Chunk a list of page texts into overlapping strings.  Each chunk will
     contain up to ``chunk_chars`` characters and will overlap by
     ``overlap_chars`` characters with the previous chunk.  Returns a list of
     dictionaries containing the chunk text and the page range it covers.
     """
-    chunks: List[Dict[str, any]] = []
+    chunks: List[Dict[str, Any]] = []
     buf = ""
     buf_pages: List[int] = []
     def flush():
@@ -122,7 +122,7 @@ class RAGEngine:
         compute embeddings, build the FAISS index and the TF–IDF matrix.  This
         method populates instance attributes for retrieval.
         """
-        records: List[Dict[str, any]] = []
+        records: List[Dict[str, Any]] = []
         doc_counter = 0
         # iterate through files
         for root, _dirs, files in os.walk(self.data_dir):
@@ -169,18 +169,31 @@ class RAGEngine:
                         "section_path": [],
                         "source_url": "",  # unknown in offline mode
                     })
+        if self.embed_model is None:
+            self.embed_model = SentenceTransformer('BAAI/bge-small-en-v1.5')
+
         if not records:
             # no documents found; still initialize empty structures
-            self.df = pd.DataFrame(columns=["chunk_id","doc_id","doc_title","text","page_start","page_end","section_path","source_url"])
-            self.faiss_index = faiss.IndexFlatIP(384)
-            self.tfidf_vectorizer = TfidfVectorizer()
-            self.tfidf_matrix = self.tfidf_vectorizer.fit_transform([""])
-            self.embed_model = SentenceTransformer('BAAI/bge-small-en-v1.5')
+            self.df = pd.DataFrame(
+                columns=[
+                    "chunk_id",
+                    "doc_id",
+                    "doc_title",
+                    "text",
+                    "page_start",
+                    "page_end",
+                    "section_path",
+                    "source_url",
+                ]
+            )
+            embedding_dim = self.embed_model.get_sentence_embedding_dimension()
+            self.faiss_index = faiss.IndexFlatIP(embedding_dim)
+            self.faiss_index.reset()
+            self.tfidf_vectorizer = None
+            self.tfidf_matrix = None
             return
         # build dataframe
         self.df = pd.DataFrame.from_records(records)
-        # load embedding model lazily
-        self.embed_model = SentenceTransformer('BAAI/bge-small-en-v1.5')
         # compute document embeddings
         docs = ["Represent the document for retrieval: " + t for t in self.df['text'].tolist()]
         embeddings = self.embed_model.encode(docs, normalize_embeddings=True, show_progress_bar=False).astype('float32')
@@ -211,13 +224,16 @@ class RAGEngine:
         fused = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return [idx for idx, _score in fused]
 
-    def search(self, query: str, k: int = 8) -> List[Dict[str, any]]:
+    def search(self, query: str, k: int = 8) -> List[Dict[str, Any]]:
         """
         Perform enhanced hybrid retrieval with better passage selection.
         Uses semantic search, TF-IDF search, and keyword matching for comprehensive results.
         """
-        if self.df is None or self.faiss_index is None or self.tfidf_vectorizer is None or self.tfidf_matrix is None:
+        if self.df is None or self.faiss_index is None or self.embed_model is None:
             raise RuntimeError("RAGEngine not ingested; call ingest() first")
+
+        if len(self.df) == 0:
+            return []
         
         # Expand search to get more candidates
         search_k = min(k * 3, len(self.df))  # Get 3x more candidates for better selection
@@ -228,9 +244,11 @@ class RAGEngine:
         vec_ids = [int(i) for i in I[0] if i >= 0]
         
         # TF-IDF search
-        q_tfidf = self.tfidf_vectorizer.transform([query])
-        sims = (q_tfidf @ self.tfidf_matrix.T).toarray()[0]
-        tf_indices = np.argsort(-sims)[:search_k].tolist()
+        tf_indices: List[int] = []
+        if self.tfidf_vectorizer is not None and self.tfidf_matrix is not None:
+            q_tfidf = self.tfidf_vectorizer.transform([query])
+            sims = (q_tfidf @ self.tfidf_matrix.T).toarray()[0]
+            tf_indices = np.argsort(-sims)[:search_k].tolist()
         
         # Keyword-based search for additional context
         query_words = set(query.lower().split())
@@ -278,7 +296,13 @@ class RAGEngine:
             })
         return hits
 
-    def generate_answer(self, question: str, passages: List[Dict[str, any]]) -> str:
+    def generate_answer(
+        self,
+        question: str,
+        passages: List[Dict[str, Any]],
+        conversation: Optional[List[Dict[str, Any]]] = None,
+        memories: Optional[List[str]] = None,
+    ) -> str:
         """
         Use the Llama API to generate an answer given a question and a
         collection of passages.  The answer will cite sources as [number].
@@ -296,6 +320,19 @@ class RAGEngine:
             snippet = p['text'][:2000]
             context_blocks.append(f"{header}\n\n{snippet}")
         context = "\n\n".join(context_blocks)
+        history_text = ""
+        if conversation:
+            formatted = []
+            for msg in conversation:
+                role = msg.get("role", "user").capitalize()
+                content = msg.get("content", "")
+                formatted.append(f"{role}: {content}")
+            history_text = "\n".join(formatted)
+        memory_text = ""
+        if memories:
+            lines = "\n".join(f"- {m}" for m in memories if m.strip())
+            if lines:
+                memory_text = f"Known user context:\n{lines}\n\n"
         system_prompt = (
             "You are an expert agriculture regulatory assistant for the Maryland Department of Agriculture. "
             "Your role is to provide comprehensive, accurate, and well-structured answers about Maryland agriculture regulations. "
@@ -347,10 +384,16 @@ class RAGEngine:
         try:
             print(f"Using Llama API: {self.llama_base_url} with model: {self.llama_model}")
             client = OpenAI(api_key=self.llama_api_key, base_url=self.llama_base_url)
+            user_parts = []
+            if history_text:
+                user_parts.append(f"Conversation so far:\n{history_text}\n")
+            if memory_text:
+                user_parts.append(memory_text)
+            user_parts.append(f"Question: {question}")
+            user_parts.append(f"Sources:\n{context}\n\nWrite a short answer with bullet points and cite sources by [number].")
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Question: {question}\n\nSources:\n{context}\n\n" \
-                                       "Write a short answer with bullet points and cite sources by [number]."}
+                {"role": "user", "content": "\n\n".join(user_parts)},
             ]
             resp = client.chat.completions.create(model=self.llama_model, messages=messages, temperature=0.2)
             print("Llama API response successful")
@@ -384,14 +427,22 @@ class RAGEngine:
             
             return "\n".join(bullets)
 
-    def answer(self, question: str, k: int = 5) -> Tuple[str, List[Dict[str, str]]]:
+    def answer(
+        self,
+        question: str,
+        k: int = 5,
+        conversation: Optional[List[Dict[str, Any]]] = None,
+        memories: Optional[List[str]] = None,
+    ) -> Tuple[str, List[Dict[str, str]]]:
         """
         Full pipeline: retrieve passages and generate an answer.  Returns the
         answer string and a list of sources with labels, page ranges and
         (placeholder) URLs.
         """
+        if k < 1:
+            raise ValueError("k must be positive")
         passages = self.search(question, k)
-        answer_text = self.generate_answer(question, passages)
+        answer_text = self.generate_answer(question, passages, conversation=conversation, memories=memories)
         # build sources list from passages in order
         sources = []
         for i, p in enumerate(passages, start=1):
@@ -433,10 +484,14 @@ class RAGEngine:
                 label += f" — {sect}"
             
             sources.append({
+                "id": p['chunk_id'],
+                "doc_id": p['doc_id'],
+                "doc_title": p['doc_title'],
                 "label": label,
                 "pages": f"{p['page_start']}-{p['page_end']}",
                 "url": url,
                 "comar_number": comar_number,
-                "comar_display": comar_display
+                "comar_display": comar_display,
+                "snippet": p['text'][:320],
             })
         return answer_text, sources

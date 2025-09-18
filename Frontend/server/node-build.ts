@@ -1,22 +1,22 @@
 import path from "path";
+import { fileURLToPath } from "url";
+import express from "express";
 import { createServer } from "./index";
-import * as express from "express";
 
 const app = createServer();
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT) || 3000;
 
 // In production, serve the built SPA files
-const __dirname = import.meta.dirname;
-const distPath = path.join(__dirname, "../spa");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const distPath = path.resolve(__dirname, "../spa");
 
-// Serve static files
+// Serve static assets from the built client bundle
 app.use(express.static(distPath));
 
-// Handle React Router - serve index.html for all non-API routes
-app.get("*", (req, res) => {
-  // Don't serve index.html for API routes
-  if (req.path.startsWith("/api/") || req.path.startsWith("/health")) {
-    return res.status(404).json({ error: "API endpoint not found" });
+// Handle React Router - serve index.html for non-API GET requests
+app.use((req, res, next) => {
+  if (req.method !== "GET" || req.path.startsWith("/api/") || req.path.startsWith("/health")) {
+    return next();
   }
 
   res.sendFile(path.join(distPath, "index.html"));
