@@ -30,10 +30,18 @@ export function ChatPanel({ filters, userId, session, loading: sessionLoading, o
   const [activeSessionId, setActiveSessionId] = useState<string | null>(session?.id ?? null);
   const [status, setStatus] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const statusTimer = useRef<number | null>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => () => {
+    if (statusTimer.current) {
+      window.clearTimeout(statusTimer.current);
+      statusTimer.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (session?.messages?.length) {
@@ -47,6 +55,10 @@ export function ChatPanel({ filters, userId, session, loading: sessionLoading, o
   const send = async () => {
     const q = input.trim();
     if (!q || loading || sessionLoading || !userId) return;
+    if (statusTimer.current) {
+      window.clearTimeout(statusTimer.current);
+      statusTimer.current = null;
+    }
     setInput("");
     const placeholderId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -57,8 +69,10 @@ export function ChatPanel({ filters, userId, session, loading: sessionLoading, o
     const isSmalltalk = /^\s*(hi|hello|hey|good\s+(morning|afternoon|evening))\b|how\s+are\s+you\b/i.test(q);
     if (!isSmalltalk) {
       setStatus("Searching COMAR corpus… (RAG)");
-      // small delay to let users see status
-      setTimeout(() => setStatus("Cross-checking with LLM…"), 600);
+      statusTimer.current = window.setTimeout(() => {
+        setStatus("Cross-checking with LLM…");
+        statusTimer.current = null;
+      }, 600);
     } else {
       setStatus(null);
     }
@@ -127,6 +141,10 @@ export function ChatPanel({ filters, userId, session, loading: sessionLoading, o
       toast({ title: "Search error", description });
     } finally {
       setLoading(false);
+      if (statusTimer.current) {
+        window.clearTimeout(statusTimer.current);
+        statusTimer.current = null;
+      }
       setStatus(null);
     }
   };
@@ -193,7 +211,9 @@ export function ChatPanel({ filters, userId, session, loading: sessionLoading, o
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4 pr-2 max-h-[65vh]">
         {status && (
-          <div className="text-xs text-muted-foreground">{status}</div>
+          <div className="text-xs text-muted-foreground" role="status" aria-live="polite">
+            {status}
+          </div>
         )}
         {(sessionLoading ? [
           { id: "loading", role: "assistant", content: "Loading session…", createdAt: new Date().toISOString() },
